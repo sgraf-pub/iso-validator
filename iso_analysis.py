@@ -37,13 +37,29 @@ def run(cmd):
     return std_output
 
 
-class MountedIso:
+class RpmPackage:
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def __package_data__(package_raw_data):
+        return {
+            'name': package_raw_data[0],
+            'version': package_raw_data[1],
+            'release': package_raw_data[2],
+            'arch': package_raw_data[3],
+            'source': package_raw_data[4],
+            'signature': package_raw_data[-1][-8:]}
+
+
+class MountedIso(RpmPackage):
     def __init__(self, iso_uri):
+        RpmPackage.__init__(self)
         self.temp_dir = tempfile.mkdtemp()
         run('mount -o loop %s %s' % (iso_uri, self.temp_dir,))
-        print "Analysing files"
+        print "ISO Analysing files"
         self.file_dict = self.__get_files__()
-        print "Analysing packages"
+        print "ISO Analysing packages"
         self.package_dict = self.__get_packages__()
 
     def __del__(self):
@@ -78,13 +94,26 @@ class MountedIso:
                 if k[-8:] == '.src.rpm':
                     package_raw_data[3] = 'source'
                     package_raw_data[4] = os.path.split(k)[-1]
-                package_dict['%s.%s' % (package_raw_data[0], package_raw_data[3],)] = {
-                    'name': package_raw_data[0],
-                    'version': package_raw_data[1],
-                    'release': package_raw_data[2],
-                    'arch': package_raw_data[3],
-                    'source': package_raw_data[4],
-                    'signature': package_raw_data[-1][-8:]}
+                package_dict['%s.%s' % (package_raw_data[0], package_raw_data[3],)] = \
+                    RpmPackage.__package_data__(package_raw_data)
+        return package_dict
+
+
+class YumRepos(RpmPackage):
+    def __init__(self):
+        RpmPackage.__init__(self)
+        print "YUM Analysing packages"
+        self.package_dict = self.__get_packages__()
+
+    @staticmethod
+    def __get_packages__():
+        package_dict = {}
+        package_list = run(r"repoquery --qf='%{name} %{version} %{release} %{arch} %{sourcerpm} none' --all")
+        for package_raw_data in package_list.split('\n'):
+            if package_raw_data:
+                package_raw_data_split = package_raw_data.split()
+                package_dict['%s.%s' % (package_raw_data_split[0], package_raw_data_split[3],)] = \
+                    RpmPackage.__package_data__(package_raw_data_split)
         return package_dict
 
 
@@ -94,6 +123,8 @@ def main():
     parser.add_option("--old_iso", help="URI of ISO image for reference (old)")
     parser.add_option("--arch", help="Target architecture (x86_64, i686...)")
     parser.add_option("--key_id", help="Package signing Key ID")
+    parser.add_option("--repo_comparison", action="store_true",
+                      help="Compare ISO packages NVRs to the available yum repos")
     args, _ = parser.parse_args()
 
     if args.new_iso is None:
@@ -177,5 +208,28 @@ def main():
                                                   package['arch']]))
         pprint.pprint(wrong_arch_packages_set)
 
+    if not args.repo_comparison:
+        print "Skipping tests comparing ISO with yum repos"
+    else:
+        print 'Package tests: comparing ISO with yum repos'
+        repo_packages = YumRepos()
+        iso_version_mismatch_set = set()
+        iso_extra_package_set = set()
+        for k, v in new_iso.package_dict.iteritems():
+            if v['arch'] != 'source':
+                try:
+                    if repo_packages.package_dict[k]['name'] != v['name'] or \
+                       repo_packages.package_dict[k]['version'] != v['version'] or \
+                       repo_packages.package_dict[k]['release'] != v['release'] or \
+                       repo_packages.package_dict[k]['arch'] != v['arch']:
+                        iso_version_mismatch_set.add(".".join(["-".join([v['name'], v['version'],
+                                                                         v['release']]), v['arch']]))
+                except KeyError:
+                    iso_extra_package_set.add(".".join(["-".join([v['name'], v['version'],
+                                                                  v['release']]), v['arch']]))
+        print "Packages on ISO with mismatched version"
+        pprint.pprint(iso_version_mismatch_set)
+        print "Packages on ISO, missing in yum repos"
+        pprint.pprint(iso_extra_package_set)
 
 main()
