@@ -21,6 +21,7 @@ import optparse
 import os
 import pprint
 import re
+import rpmUtils.miscutils
 import subprocess
 import sys
 import tempfile
@@ -213,23 +214,33 @@ def main():
     else:
         print 'Package tests: comparing ISO with yum repos'
         repo_packages = YumRepos()
-        iso_version_mismatch_set = set()
+        iso_version_older_set = set()
+        iso_version_newer_set = set()
         iso_extra_package_set = set()
         for k, v in new_iso.package_dict.iteritems():
             if v['arch'] != 'source':
                 try:
-                    if repo_packages.package_dict[k]['name'] != v['name'] or \
-                       repo_packages.package_dict[k]['version'] != v['version'] or \
-                       repo_packages.package_dict[k]['release'] != v['release'] or \
-                       repo_packages.package_dict[k]['arch'] != v['arch']:
-                        iso_version_mismatch_set.add(".".join(["-".join([v['name'], v['version'],
-                                                                         v['release']]), v['arch']]))
+                    comparison = rpmUtils.miscutils.compareEVR((repo_packages.package_dict[k]['name'],
+                                                                repo_packages.package_dict[k]['version'],
+                                                                repo_packages.package_dict[k]['release']),
+                                                               (v['name'],
+                                                                v['version'],
+                                                                v['release']))
+                    if comparison < 0:
+                        iso_version_newer_set.add(".".join(["-".join([v['name'], v['version'],
+                                                                      v['release']]), v['arch']]))
+                    elif comparison > 0:
+                        iso_version_older_set.add(".".join(["-".join([v['name'], v['version'],
+                                                                      v['release']]), v['arch']]))
                 except KeyError:
                     iso_extra_package_set.add(".".join(["-".join([v['name'], v['version'],
                                                                   v['release']]), v['arch']]))
-        print "Packages on ISO with mismatched version"
-        pprint.pprint(iso_version_mismatch_set)
+        print "Unreleased version (older on CDN)"
+        pprint.pprint(iso_version_newer_set)
+        print "Not updated packages (newer on CDN)"
+        pprint.pprint(iso_version_older_set)
         print "Packages on ISO, missing in yum repos"
         pprint.pprint(iso_extra_package_set)
+
 
 main()
