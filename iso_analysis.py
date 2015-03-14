@@ -235,9 +235,9 @@ def main():
                 except KeyError:
                     iso_extra_package_set.add(".".join(["-".join([v['name'], v['version'],
                                                                   v['release']]), v['arch']]))
-        print "Unreleased version (older on CDN)"
+        print "Unreleased version (newer on ISO, older in yum repos)"
         pprint.pprint(iso_version_newer_set)
-        print "Not updated packages (newer on CDN)"
+        print "Not updated packages (older on ISO, newer in yum repos)"
         pprint.pprint(iso_version_older_set)
         print "Packages on ISO, missing in yum repos"
         pprint.pprint(iso_extra_package_set)
