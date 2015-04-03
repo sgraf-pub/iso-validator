@@ -109,7 +109,7 @@ class YumRepos(RpmPackage):
     @staticmethod
     def __get_packages__():
         package_dict = {}
-        package_list = run(r"repoquery --qf='%{name} %{version} %{release} %{arch} %{sourcerpm} none' --all")
+        package_list = run(r"repoquery --plugins --qf='%{name} %{version} %{release} %{arch} %{sourcerpm} none' --all")
         for package_raw_data in package_list.split('\n'):
             if package_raw_data:
                 package_raw_data_split = package_raw_data.split()
