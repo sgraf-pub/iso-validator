@@ -140,6 +140,11 @@ def main():
     else:
         print "Analysing %s as old iso" % args.old_iso
         old_iso = MountedIso(args.old_iso)
+
+        #
+        # File (non-rpm) tests (added, removed, changed)
+        #
+
         print 'File (non-rpm) tests: files added (new vs old iso)'
         extra_files = [k
                        for k, v in new_iso.file_dict.iteritems()
@@ -149,7 +154,7 @@ def main():
 
         print 'File (non-rpm) tests: files removed (new vs old iso)'
         missing_files = [k
-                         for k, v in new_iso.file_dict.iteritems()
+                         for k, v in old_iso.file_dict.iteritems()
                          if k in set(old_iso.file_dict.iterkeys()) - set(new_iso.file_dict.iterkeys())
                          and v['type'] == 'none']
         pprint.pprint(set(missing_files))
@@ -159,6 +164,10 @@ def main():
                         for single_file in set(new_iso.file_dict.iterkeys()) & set(old_iso.file_dict.iterkeys())
                         if new_iso.file_dict[single_file]['crc'] != old_iso.file_dict[single_file]['crc']]
         pprint.pprint(set(crc_mismatch))
+
+        #
+        # Package (rpm) tests (added, removed, changed)
+        #
 
         print 'Package tests: packages added (new vs old iso)'
         extra_packages = [new_iso.package_dict[package]
@@ -177,6 +186,9 @@ def main():
             missing_packages_set.add(".".join(["-".join([package['name'], package['version'], package['release']]),
                                                package['arch']]))
         pprint.pprint(missing_packages_set)
+
+        # Package (rpm) changed is missing, since we are comparing only package name. So the same package name can have
+        # different version, release, architecture, signature
 
     if args.key_id is None:
         print "Skipping tests requiring Key ID"
@@ -241,6 +253,7 @@ def main():
         pprint.pprint(iso_version_older_set)
         print "Packages on ISO, missing in yum repos"
         pprint.pprint(iso_extra_package_set)
+        # Packages in yum repos and missing on ISO skipped here. Not sure if there would be use case for it.
 
 
 main()
