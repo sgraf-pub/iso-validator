@@ -121,6 +121,7 @@ class YumRepos(RpmPackage):
 def main():
     parser = optparse.OptionParser()
     parser.add_option("--new_iso", help="URI of ISO image for validation (new)")
+    parser.add_option("--source_iso", help="URI of complementary ISO with source rpms (new)")
     parser.add_option("--old_iso", help="URI of ISO image for reference (old)")
     parser.add_option("--arch", help="Target architecture (x86_64, i686...)")
     parser.add_option("--key_id", help="Package signing Key ID")
@@ -128,90 +129,151 @@ def main():
                       help="Compare ISO packages NVRs to the available yum repos")
     args, _ = parser.parse_args()
 
+    print
+    print
     if args.new_iso is None:
         print "URI of ISO image for validation (--new_iso) is mandatory"
         sys.exit(1)
-    print "Analysing %s as new iso" % args.new_iso
+    print "# Analysing %s as new iso" % args.new_iso
     new_iso = MountedIso(args.new_iso)
 
+    print
+    print
     if args.old_iso is None:
-        print "Skipping analysis of old iso"
-        print "Skipping tests requiring old iso"
+        print "# Skipping analysis of old iso"
+        print "# Skipping tests requiring old iso"
     else:
-        print "Analysing %s as old iso" % args.old_iso
+        print "# Analysing %s as old iso" % args.old_iso
         old_iso = MountedIso(args.old_iso)
 
-        #
-        # File (non-rpm) tests (added, removed, changed)
-        #
+        ###############################################################################################################
+        print
+        print
+        print "# File (non-rpm) tests (added, removed, changed)"
+        print "(skipping files with .rpm suffix)"
 
-        print 'File (non-rpm) tests: files added (new vs old iso)'
+        print
+        print '## File (non-rpm) tests: files added (new vs old iso)'
         extra_files = [k
                        for k, v in new_iso.file_dict.iteritems()
                        if k in set(new_iso.file_dict.iterkeys()) - set(old_iso.file_dict.iterkeys())
                        and v['type'] == 'none']
         pprint.pprint(set(extra_files))
 
-        print 'File (non-rpm) tests: files removed (new vs old iso)'
+        print
+        print '## File (non-rpm) tests: files removed (new vs old iso)'
         missing_files = [k
                          for k, v in old_iso.file_dict.iteritems()
                          if k in set(old_iso.file_dict.iterkeys()) - set(new_iso.file_dict.iterkeys())
                          and v['type'] == 'none']
         pprint.pprint(set(missing_files))
 
-        print 'File (non-rpm) tests: changed files (new vs old iso)'
+        print
+        print '## File (non-rpm) tests: changed files (new vs old iso)'
         crc_mismatch = [single_file
                         for single_file in set(new_iso.file_dict.iterkeys()) & set(old_iso.file_dict.iterkeys())
                         if new_iso.file_dict[single_file]['crc'] != old_iso.file_dict[single_file]['crc']]
         pprint.pprint(set(crc_mismatch))
 
-        #
-        # Package (rpm) tests (added, removed, changed)
-        #
+        ###############################################################################################################
+        print
+        print
+        print "# Package (rpm) tests (added, removed)"
+        print "(only files with .rpm suffix included)"
 
-        print 'Package tests: packages added (new vs old iso)'
+        print
+        print '## Package tests: packages added (new vs old iso)'
         extra_packages = [new_iso.package_dict[package]
-                          for package in set(new_iso.package_dict.iterkeys()) - set(old_iso.package_dict.iterkeys())]
+                          for package in set(new_iso.package_dict.iterkeys()) - set(old_iso.package_dict.iterkeys())
+                          if new_iso.package_dict[package]['arch'] != 'source']
         extra_packages_set = set()
         for package in extra_packages:
             extra_packages_set.add(".".join(["-".join([package['name'], package['version'], package['release']]),
                                              package['arch']]))
         pprint.pprint(extra_packages_set)
 
-        print 'Package tests: packages removed (new vs old iso)'
+        print
+        print '## Package tests: packages removed (new vs old iso)'
         missing_packages = [old_iso.package_dict[package]
-                            for package in set(old_iso.package_dict.iterkeys()) - set(new_iso.package_dict.iterkeys())]
+                            for package in set(old_iso.package_dict.iterkeys()) - set(new_iso.package_dict.iterkeys())
+                            if old_iso.package_dict[package]['arch'] != 'source']
         missing_packages_set = set()
         for package in missing_packages:
             missing_packages_set.add(".".join(["-".join([package['name'], package['version'], package['release']]),
                                                package['arch']]))
         pprint.pprint(missing_packages_set)
 
-        # Package (rpm) changed is missing, since we are comparing only package name. So the same package name can have
-        # different version, release, architecture, signature
+        # Package (.rpm suffix) changed is missing, since we are comparing only package name. So the same package name
+        # can have different version, release, architecture, signature
 
+        iso_version_older_set = set()
+        iso_version_newer_set = set()
+        iso_extra_package_set = set()
+        for k, v in new_iso.package_dict.iteritems():
+            if v['arch'] != 'source':
+                try:
+                    comparison = rpmUtils.miscutils.compareEVR((old_iso.package_dict[k]['name'],
+                                                                old_iso.package_dict[k]['version'],
+                                                                old_iso.package_dict[k]['release']),
+                                                               (v['name'],
+                                                                v['version'],
+                                                                v['release']))
+                    if comparison < 0:
+                        iso_version_newer_set.add(".".join(["-".join([v['name'], v['version'],
+                                                                      v['release']]), v['arch']]))
+                    elif comparison > 0:
+                        iso_version_older_set.add(".".join(["-".join([v['name'], v['version'],
+                                                                      v['release']]), v['arch']]))
+                except KeyError:
+                    iso_extra_package_set.add(".".join(["-".join([v['name'], v['version'],
+                                                                  v['release']]), v['arch']]))
+        print
+        print "## Package tests: packages upgraded (new vs old iso)"
+        pprint.pprint(iso_version_newer_set)
+        print
+        print "## Package tests: packages downgraded (new vs old iso)"
+        pprint.pprint(iso_version_older_set)
+
+    ###################################################################################################################
+    print
+    print
     if args.key_id is None:
-        print "Skipping tests requiring Key ID"
+        print "# Skipping tests requiring Key ID"
     else:
-        print 'Package tests: possibly unsigned (new iso only)'
+        print '# Package tests: possibly unsigned (new iso only)'
         unsigned_packages = [k
                              for k, v in new_iso.package_dict.iteritems()
                              if v['signature'] != args.key_id]
         pprint.pprint(set(unsigned_packages))
 
-    print 'Package tests: missing source (new iso only)'
-    source_names = [v['name']
-                    for v in new_iso.file_dict.itervalues()
-                    if len(v['name']) > 8 and v['name'][-8:] == '.src.rpm']
+    ###################################################################################################################
+    print
+    print
+    print '# Package tests: missing source (new iso only)'
+    if args.source_iso is None:
+        print "# Skipping analysis of source iso (new)"
+        source_names = [v['name']
+                        for v in new_iso.file_dict.itervalues()
+                        if len(v['name']) > 8 and v['name'][-8:] == '.src.rpm']
+    else:
+        print "# Analysing %s as source iso (new)" % args.source_iso
+        source_iso = MountedIso(args.source_iso)
+        source_names = [v['name']
+                        for v in source_iso.file_dict.itervalues()
+                        if len(v['name']) > 8 and v['name'][-8:] == '.src.rpm']
+
     missing_source_rpms = [v['source']
                            for v in new_iso.package_dict.itervalues()
                            if not v['source'] in source_names]
     pprint.pprint(set(missing_source_rpms))
 
+    ###################################################################################################################
+    print
+    print
     if args.arch is None:
-        print "Skipping tests requiring target architecture"
+        print "# Skipping tests requiring target architecture"
     else:
-        print 'Package tests: wrong arch (new iso only)'
+        print '# Package tests: wrong arch (new iso only)'
         wrong_arch_packages = [package
                                for package in new_iso.package_dict.itervalues()
                                if not package['arch'] in [args.arch, 'source', 'noarch']]
@@ -221,10 +283,13 @@ def main():
                                                   package['arch']]))
         pprint.pprint(wrong_arch_packages_set)
 
+    ###################################################################################################################
+    print
+    print
     if not args.repo_comparison:
-        print "Skipping tests comparing ISO with yum repos"
+        print "# Skipping tests comparing ISO with yum repos"
     else:
-        print 'Package tests: comparing ISO with yum repos'
+        print '# Package tests: comparing ISO with yum repos'
         repo_packages = YumRepos()
         iso_version_older_set = set()
         iso_version_newer_set = set()
@@ -247,13 +312,18 @@ def main():
                 except KeyError:
                     iso_extra_package_set.add(".".join(["-".join([v['name'], v['version'],
                                                                   v['release']]), v['arch']]))
-        print "Unreleased version (newer on ISO, older in yum repos)"
+        print
+        print "## Unreleased version (newer on ISO, older in yum repos)"
         pprint.pprint(iso_version_newer_set)
-        print "Not updated packages (older on ISO, newer in yum repos)"
+        print
+        print "## Not updated packages (older on ISO, newer in yum repos)"
         pprint.pprint(iso_version_older_set)
-        print "Packages on ISO, missing in yum repos"
+        print
+        print "## Packages on ISO, missing in yum repos"
         pprint.pprint(iso_extra_package_set)
-        # Packages in yum repos and missing on ISO skipped here. Not sure if there would be use case for it.
+        print
+        print "## Packages in yum repos, missing on ISO"
+        print "(out of scope of this tool, skipped)"
 
 
 main()
