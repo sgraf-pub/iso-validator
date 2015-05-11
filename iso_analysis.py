@@ -124,7 +124,7 @@ def main():
     parser.add_option("--source_iso", help="URI of complementary ISO with source rpms (new)")
     parser.add_option("--old_iso", help="URI of ISO image for reference (old)")
     parser.add_option("--arch", help="Target architecture (x86_64, i686...)")
-    parser.add_option("--key_id", help="Package signing Key ID")
+    parser.add_option("--key_id", action="append", help="Package signing Key ID (can be specified multiple times)")
     parser.add_option("--repo_comparison", action="store_true",
                       help="Compare ISO packages NVRs to the available yum repos")
     args, _ = parser.parse_args()
@@ -243,7 +243,7 @@ def main():
         print '# Package tests: possibly unsigned (new iso only)'
         unsigned_packages = [k
                              for k, v in new_iso.package_dict.iteritems()
-                             if v['signature'] != args.key_id]
+                             if v['signature'] not in args.key_id]
         pprint.pprint(set(unsigned_packages))
 
     ###################################################################################################################
