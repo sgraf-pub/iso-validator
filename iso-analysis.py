@@ -1,6 +1,7 @@
 #!/usr/bin/python2
 
 # for RPM based distributions, analyse given ISO and compare with the old one
+# v0.20
 # Copyright (C) 2015  Stanislav Graf
 #
 # This program is free software; you can redistribute it and/or modify
@@ -57,7 +58,15 @@ class MountedIso(RpmPackage):
     def __init__(self, iso_uri):
         RpmPackage.__init__(self)
         self.temp_dir = tempfile.mkdtemp()
-        run('mount -o loop %s %s' % (iso_uri, self.temp_dir,))
+        if '.iso' == iso_uri[-4:]:
+            run('mount -o ro,loop %s %s' % (iso_uri, self.temp_dir,))
+            self.type = 'iso'
+        elif '.raw' == iso_uri[-4:]:
+            start_at = run('fdisk -l -o Start %s | tail -1' % iso_uri)
+            run('mount -o ro,loop,offset=%d %s %s' % (int(start_at.strip()) * 512, iso_uri, self.temp_dir,))
+            self.type = 'image'
+        else:
+            sys.exit(1)
         print "ISO Analysing files"
         self.file_dict = self.__get_files__()
         print "ISO Analysing packages"
@@ -73,43 +82,66 @@ class MountedIso(RpmPackage):
             file_dict[single_file_path] = {'name': single_file, 'type': file_type, 'crc': single_file_crc}
 
         file_dict = {}
-        for root, _, files in os.walk(self.temp_dir):
-            if re.search('repodata', root):
-                for single_file in files:
-                    add_file('repodata')
-            else:
-                for single_file in files:
-                    if single_file[-4:] == '.rpm':
-                        add_file('rpm')
-                    else:
-                        add_file('none')
+        if self.type == 'iso':
+            for root, _, files in os.walk(self.temp_dir):
+                if re.search('repodata', root):
+                    for single_file in files:
+                        add_file('repodata')
+                else:
+                    for single_file in files:
+                        if single_file[-4:] == '.rpm':
+                            add_file('rpm')
+                        else:
+                            add_file('none')
         return file_dict
 
     def __get_packages__(self):
+        def parse_data(data):
+            if k[-8:] == '.src.rpm' and self.type == 'iso':
+                data[3] = 'source'
+                data[4] = os.path.split(k)[-1]
+            package_dict['%s.%s' % (data[0], data[3],)] = \
+                RpmPackage.__package_data__(data)
+
         package_dict = {}
-        for k, v in self.file_dict.iteritems():
-            if v['type'] == 'rpm':
-                package_raw_data = run(("rpm -q --qf='%%{name} %%{version} %%{release} %%{arch} %%{sourcerpm} "
-                                        "%%{SIGPGP:pgpsig}' --nosignature -p %s")
-                                       % os.path.join(self.temp_dir, k)).split()
-                if k[-8:] == '.src.rpm':
-                    package_raw_data[3] = 'source'
-                    package_raw_data[4] = os.path.split(k)[-1]
-                package_dict['%s.%s' % (package_raw_data[0], package_raw_data[3],)] = \
-                    RpmPackage.__package_data__(package_raw_data)
+        query_string = "rpm -q --qf='%{name} %{version} %{release} %{arch} %{sourcerpm} %{SIGPGP:pgpsig}' "\
+                       "--nosignature "
+
+        if self.type == 'iso':
+            for k, v in self.file_dict.iteritems():
+                if v['type'] == 'rpm':
+                    package_raw_data = run("%s -p %s" % (query_string, os.path.join(self.temp_dir, k))).split()
+                    parse_data(package_raw_data)
+        elif self.type == 'image':
+            for k in filter(bool, (run('rpm -qa --dbpath=%s/var/lib/rpm' % self.temp_dir)).split('\n')):
+                package_raw_data = run("%s --dbpath=%s/var/lib/rpm %s" % (query_string, self.temp_dir, k)).split()
+                parse_data(package_raw_data)
+
         return package_dict
 
 
 class YumRepos(RpmPackage):
-    def __init__(self):
+    def __init__(self, repofrompath):
         RpmPackage.__init__(self)
         print "YUM Analysing packages"
-        self.package_dict = self.__get_packages__()
+        self.package_dict = self.__get_packages__(repofrompath)
 
     @staticmethod
-    def __get_packages__():
+    def __get_packages__(repofrompath):
+        repos_define = ''
+        repos_enable = ''
+        for k in repofrompath:
+            repos_define += ' --repofrompath=%s ' % k
+            if repos_enable:
+                repos_enable += ',%s' % k.split(',')[0]
+            else:
+                repos_enable += '%s' % k.split(',')[0]
+        print repos_define
+        print repos_enable
         package_dict = {}
-        package_list = run(r"repoquery --plugins --qf='%{name} %{version} %{release} %{arch} %{sourcerpm} none' --all")
+        package_list = run("repoquery %s --disablerepo='*' --enablerepo=%s "
+                           "--qf='%%{name} %%{version} %%{release} %%{arch} %%{sourcerpm} none' --all"
+                           % (repos_define, repos_enable, ))
         for package_raw_data in package_list.split('\n'):
             if package_raw_data:
                 package_raw_data_split = package_raw_data.split()
@@ -120,13 +152,19 @@ class YumRepos(RpmPackage):
 
 def main():
     parser = optparse.OptionParser()
-    parser.add_option("--new_iso", help="URI of ISO image for validation (new)")
-    parser.add_option("--source_iso", help="URI of complementary ISO with source rpms (new)")
-    parser.add_option("--old_iso", help="URI of ISO image for reference (old)")
-    parser.add_option("--arch", help="Target architecture (x86_64, i686...)")
-    parser.add_option("--key_id", action="append", help="Package signing Key ID (can be specified multiple times)")
-    parser.add_option("--repo_comparison", action="store_true",
+    parser.add_option("--new-iso", dest="new_iso", help="URI of binary content for validation (new)")
+    parser.add_option("--source-iso", dest="source_iso", help="URI of source content for validation (new)")
+    parser.add_option("--old-iso", dest="old_iso", help="URI of content for reference (old)")
+    parser.add_option("--arch", dest="arch", help="Target architecture (x86_64, i686...)")
+    parser.add_option("--key-id", dest="key_id", action="append",
+                      help="Package signing Key ID (can be specified multiple times)")
+    parser.add_option("--repo-comparison", dest="repo_comparison", action="store_true",
                       help="Compare ISO packages NVRs to the available yum repos")
+    parser.add_option("--repofrompath", dest="repofrompath", action="append",
+                      help="Specify repoid & paths of additional repositories - unique repoid and "
+                      "complete path required, can be specified multiple times. "
+                      "Example. --repofrompath=myrepo,/path/to/repo")
+
     args, _ = parser.parse_args()
 
     print
@@ -140,7 +178,6 @@ def main():
     print
     print
     if args.old_iso is None:
-        print "# Skipping analysis of old iso"
         print "# Skipping tests requiring old iso"
     else:
         print "# Analysing %s as old iso" % args.old_iso
@@ -249,23 +286,20 @@ def main():
     ###################################################################################################################
     print
     print
-    print '# Package tests: missing source (new iso only)'
     if args.source_iso is None:
-        print "# Skipping analysis of source iso (new)"
-        source_names = [v['name']
-                        for v in new_iso.file_dict.itervalues()
-                        if len(v['name']) > 8 and v['name'][-8:] == '.src.rpm']
+        print "# Skipping tests requiring source content (new)"
     else:
+        print '# Package tests: missing source (new iso only)'
         print "# Analysing %s as source iso (new)" % args.source_iso
         source_iso = MountedIso(args.source_iso)
         source_names = [v['name']
                         for v in source_iso.file_dict.itervalues()
                         if len(v['name']) > 8 and v['name'][-8:] == '.src.rpm']
 
-    missing_source_rpms = [v['source']
-                           for v in new_iso.package_dict.itervalues()
-                           if not v['source'] in source_names]
-    pprint.pprint(set(missing_source_rpms))
+        missing_source_rpms = [v['source']
+                               for v in new_iso.package_dict.itervalues()
+                               if not v['source'] in source_names]
+        pprint.pprint(set(missing_source_rpms))
 
     ###################################################################################################################
     print
@@ -286,11 +320,11 @@ def main():
     ###################################################################################################################
     print
     print
-    if not args.repo_comparison:
-        print "# Skipping tests comparing ISO with yum repos"
+    if args.repo_comparison is None:
+        print "# Skipping tests requiring repos"
     else:
         print '# Package tests: comparing ISO with yum repos'
-        repo_packages = YumRepos()
+        repo_packages = YumRepos(args.repofrompath)
         iso_version_older_set = set()
         iso_version_newer_set = set()
         iso_extra_package_set = set()
