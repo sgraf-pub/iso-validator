@@ -62,8 +62,8 @@ class MountedIso(RpmPackage):
             run('mount -o ro,loop %s %s' % (iso_uri, self.temp_dir,))
             self.type = 'iso'
         elif '.raw' == iso_uri[-4:]:
-            start_at = run('fdisk -l -o Start %s | tail -1' % iso_uri)
-            run('mount -o ro,loop,offset=%d %s %s' % (int(start_at.strip()) * 512, iso_uri, self.temp_dir,))
+            start_at = int(run('fdisk -l %s | tail -1' % iso_uri).split()[2])
+            run('mount -o ro,loop,offset=%d %s %s' % (start_at * 512, iso_uri, self.temp_dir,))
             self.type = 'image'
         else:
             sys.exit(1)
