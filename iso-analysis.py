@@ -1,7 +1,7 @@
 #!/usr/bin/python2
 
 # for RPM based distributions, analyse given ISO and compare with the old one
-# v0.20
+# v0.21
 # Copyright (C) 2015  Stanislav Graf
 #
 # This program is free software; you can redistribute it and/or modify
@@ -62,7 +62,10 @@ class MountedIso(RpmPackage):
             run('mount -o ro,loop %s %s' % (iso_uri, self.temp_dir,))
             self.type = 'iso'
         elif '.raw' == iso_uri[-4:]:
-            start_at = int(run('fdisk -l %s | tail -1' % iso_uri).split()[2])
+            try:
+                start_at = int(run('fdisk -l %s 2>/dev/null| tail -1' % iso_uri).split()[1])
+            except ValueError:
+                start_at = int(run('fdisk -l %s 2>/dev/null| tail -1' % iso_uri).split()[2])
             run('mount -o ro,loop,offset=%d %s %s' % (start_at * 512, iso_uri, self.temp_dir,))
             self.type = 'image'
         else:
