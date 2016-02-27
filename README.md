@@ -20,8 +20,8 @@ Options:
                         times)
   --repo-comparison     Compare ISO packages NVRs to the available yum repos
   --repofrompath=REPOFROMPATH
-                        Specify repoid & paths of additional repositories -
-                        unique repoid and complete path required, can be
-                        specified multiple times. Example.
-                        --repofrompath=myrepo,/path/to/repo
+                        Specify repoid & path or url to additional repository
+                        (same path as in a baseurl) - unique repoid and
+                        complete path required, can be specified multiple
+                        times. Example. --repofrompath=<repoid>,<path/url>
 ```
