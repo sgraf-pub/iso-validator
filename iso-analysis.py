@@ -84,7 +84,7 @@ class MountedIso(RpmPackage):
         self.package_dict = self.__get_packages__()
 
     def __del__(self):
-        run('umount %s' % self.temp_dir)
+        run('umount -l %s' % self.temp_dir)
 
     def __get_files__(self):
         def add_file(file_type):
