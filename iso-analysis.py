@@ -68,6 +68,14 @@ class MountedIso(RpmPackage):
                 start_at = int(run('fdisk -l %s 2>/dev/null| tail -1' % iso_uri).split()[2])
             run('mount -o ro,loop,offset=%d %s %s' % (start_at * 512, iso_uri, self.temp_dir,))
             self.type = 'image'
+        elif '.qcow2' == iso_uri[-6:]:
+            mount_point = run("guestmount -a %s -m /dev/sdx1 %s 2>&1 | grep -e ext4 -e xfs | awk '{ print $2 }'" % (iso_uri, self.temp_dir))
+            if not mount_point:
+                output = run("guestmount -a %s -m /dev/sdx1 %s" % (iso_uri, self.temp_dir))
+                print output
+                sys.exit(1)
+            run("guestmount -a %s -m %s %s 2>&1 | grep -e ext4 -e xfs | awk '{ print $2 }'" % (iso_uri, mount_point.strip(), self.temp_dir))
+            self.type = 'image'
         else:
             sys.exit(1)
         print "ISO Analysing files"
