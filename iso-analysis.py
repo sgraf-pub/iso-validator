@@ -71,7 +71,7 @@ class MountedIso(RpmPackage):
         elif '.qcow2' == iso_uri[-6:]:
             mount_point = run("guestmount -a %s -m /dev/sdx1 --ro %s 2>&1 | grep -e ext4 -e xfs | awk '{ print $2 }'" % (iso_uri, self.temp_dir))
             if not mount_point:
-                output = run("guestmount -a %s -m --ro /dev/sdx1 %s" % (iso_uri, self.temp_dir))
+                output = run("guestmount -a %s -m /dev/sdx1 --ro %s" % (iso_uri, self.temp_dir))
                 print output
                 sys.exit(1)
             run("guestmount -a %s -m %s %s --ro 2>&1 | grep -e ext4 -e xfs | awk '{ print $2 }'" % (iso_uri, mount_point.strip(), self.temp_dir))
